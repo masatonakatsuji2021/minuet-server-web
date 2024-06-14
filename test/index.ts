@@ -10,8 +10,9 @@ const mw = new MinuetWeb({
     // response header 
     headers : {
         // cache control (keep max 60s)
-        "cache-control":"max-age=60",
-    }
+        "cache-control":"max-age=60,",
+    },
+    directoryIndexs: [ "index.html" ],
 });
 
 // server listen

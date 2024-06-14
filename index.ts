@@ -113,6 +113,11 @@ export interface MinuetWebOption {
      * (The default is ``false``.)
      */
     notFound? : string | boolean,
+
+    /**
+     * ***directoryIndexs*** : Specifies a list of files to display for a directory request.
+     */
+    directoryIndexs? : Array<string>,
 }
 
 /**
@@ -197,6 +202,11 @@ export class MinuetWeb {
      */
     public notFound : string | boolean= false;
 
+    /**
+     * ***directoryIndexs*** : Specifies a list of files to display for a directory request.
+     */
+    public directoryIndexs : Array<string> = [];
+
     private buffers = {};
 
     /**
@@ -229,6 +239,7 @@ export class MinuetWeb {
         if (options.bufferingMaxSize != undefined) this.bufferingMaxSize = options.bufferingMaxSize;
         if (options.directReading != undefined) this.directReading = options.directReading;
         if (options.notFound != undefined) this.notFound = options.notFound;
+        if (options.directoryIndexs != undefined) this.directoryIndexs = options.directoryIndexs;
         this.updateBuffer();
         return this;
     }
@@ -351,6 +362,35 @@ export class MinuetWeb {
         }
     }
 
+    private getUrl(baseUrl: string) : string {
+        const url = baseUrl.split("?")[0];
+        let urlList = [];
+        urlList.push(url);
+        for (let n = 0 ; n < this.directoryIndexs.length ; n++){
+            const index = this.directoryIndexs[n];
+            urlList.push((url + "/" + index).split("//").join("/"));
+        }
+
+        let decisionUrl : string;
+        for (let n = 0 ; n < urlList.length ; n++){
+            const url_ = urlList[n];;
+            if (this.directReading) {
+                const exists = fs.existsSync(this.rootDir + "/" + url_);
+                if (exists) {
+                    decisionUrl = url_;
+                    break;                   
+                }
+             }
+             else {
+                if(this.buffers[url_]){
+                    decisionUrl = url_;
+                    break;
+                }                    
+             }
+        }
+
+        return decisionUrl;        
+    }
     /**
      * ***listen*** : Proxy processing when the server listens.
      * Here, based on the request URL,   
@@ -361,13 +401,14 @@ export class MinuetWeb {
      * @returns {boolean} judgment result
      */
     public listen(req :IncomingMessage, res : ServerResponse ) : boolean {
-        const url = (req.url.split("?")[0]);
-        let content;
-        if (!this.buffers[url]){
-            if (!this.directReading) return this.error(res);
-            if (!this.existFile(url)) return this.error(res);
+        let url = this.getUrl(req.url.split("?")[0]);
+        if (!url){
+            return this.error(res);
         }
-        content = this.readFile(url);
+//        if (!this.buffers[url]){
+//            if (!this.existFile(url)) return this.error(res);
+//        }
+        let content = this.readFile(url);
 
         res.statusCode = 200;
         this.headers["content-type"] = this.getMime(url);
