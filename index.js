@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.MinuetWeb = exports.DefaultMimes = void 0;
+exports.MinuetServerModuleWeb = exports.MinuetWeb = exports.DefaultMimes = void 0;
 /**
  * MIT License
  *
@@ -26,6 +26,7 @@ exports.MinuetWeb = exports.DefaultMimes = void 0;
  */
 const fs = require("fs");
 const path = require("path");
+const minuet_server_1 = require("minuet-server");
 /**
  * ***DefaultMimes*** : Default MimeType List
  */
@@ -337,3 +338,16 @@ class MinuetWeb {
     }
 }
 exports.MinuetWeb = MinuetWeb;
+class MinuetServerModuleWeb extends minuet_server_1.MinuetServerModuleBase {
+    onBegin() {
+        if (!this.init) {
+            this.init = {};
+        }
+        this.init.rootDir = this.sector.root + "/" + this.init.rootDir,
+            this.mse = new MinuetWeb(this.init);
+    }
+    onRequest(req, res) {
+        this.mse.listen(req, res);
+    }
+}
+exports.MinuetServerModuleWeb = MinuetServerModuleWeb;

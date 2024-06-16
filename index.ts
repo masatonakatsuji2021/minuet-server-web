@@ -24,6 +24,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { IncomingMessage, ServerResponse } from "http";
+import { MinuetServerModuleBase, MinuetServerSector } from "minuet-server";
 
 /**
  * ***DefaultMimes*** : Default MimeType List
@@ -418,4 +419,22 @@ export class MinuetWeb {
 
         return true;
     }
+}
+
+export class MinuetServerModuleWeb extends MinuetServerModuleBase {
+    
+    public mse : MinuetWeb;
+
+    public onBegin(){
+        if (!this.init) {
+            this.init = {};
+        }
+        this.init.rootDir = this.sector.root + "/" + this.init.rootDir,
+        this.mse = new MinuetWeb(this.init);
+    }
+
+    public onRequest(req: IncomingMessage, res: ServerResponse<IncomingMessage>): void {
+        this.mse.listen(req, res);
+    }
+
 }
