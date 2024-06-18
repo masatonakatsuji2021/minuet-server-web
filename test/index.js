@@ -13,7 +13,10 @@ const mw = new __1.MinuetWeb({
         // cache control (keep max 60s)
         "cache-control": "max-age=60,",
     },
+    // directory indexs
     directoryIndexs: ["index.html"],
+    // list navigator
+    listNavigator: true,
 });
 // server listen
 const h = http.createServer((req, res) => {
