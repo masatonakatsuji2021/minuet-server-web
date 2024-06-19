@@ -24,7 +24,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { IncomingMessage, ServerResponse } from "http";
-import { MinuetServerModuleBase, MinuetServerSector } from "minuet-server";
+import { MinuetServerModuleBase } from "minuet-server";
 
 /**
  * ***DefaultMimes*** : Default MimeType List
@@ -95,7 +95,7 @@ export interface MinuetWebOption {
 
     /**
      * ***bufferingMaxSize*** : Maximum size of buffered file.  
-     * (The default is 8MB.)
+     * (The default is 4MB.)
      */
     bufferingMaxSize? : number,
 
@@ -119,6 +119,24 @@ export interface MinuetWebOption {
      * ***directoryIndexs*** : Specifies a list of files to display for a directory request.
      */
     directoryIndexs? : Array<string>,
+
+    /**
+     * ***listNavigator*** : Determines whether to display the file/directory list screen when a directory area is specified in the URL.  
+     * Displays the list screen when there is no content to display in the URL to the directory.  
+     * The default is ``false``.
+     */
+    listNavigator?: boolean, 
+
+    /**
+     * ***logAccess*** : Specify the log output at the time of the request.  
+     * Apply the log setting name set in ``minuet-server-logger``.
+     */
+    logAccess? : string,
+}
+
+enum MinuetWebBufferName {
+    notFound = "#notfound",
+    listNavigator = "#listNavigator",
 }
 
 /**
@@ -183,9 +201,9 @@ export class MinuetWeb {
 
     /**
      * ***bufferingMaxSize*** : Maximum size of buffered file.  
-     * (The default is 8MB.)
+     * (The default is 4MB.)
      */
-    public bufferingMaxSize : number =  8000000;
+    public bufferingMaxSize : number =  4000000;
 
     /**
      * ***directReading*** : When ``buffering`` is set to ``true``,    
@@ -208,7 +226,22 @@ export class MinuetWeb {
      */
     public directoryIndexs : Array<string> = [];
 
+    /**
+     * ***listNavigator*** : Determines whether to display the file/directory list screen when a directory area is specified in the URL.  
+     * Displays the list screen when there is no content to display in the URL to the directory.  
+     * The default is ``false``.
+     */
+    public listNavigator?: boolean = false;
+
+    /**
+     * ***logAccess*** : Specify the log output at the time of the request.  
+     * Apply the log setting name set in ``minuet-server-logger``.
+     */
+    public logAccess? : string;
+
     private buffers = {};
+    private directoryBuffers = [];
+    public logger;
 
     /**
      * ***constructor*** : If options are specified, it behaves the same as the setting method.  
@@ -241,6 +274,8 @@ export class MinuetWeb {
         if (options.directReading != undefined) this.directReading = options.directReading;
         if (options.notFound != undefined) this.notFound = options.notFound;
         if (options.directoryIndexs != undefined) this.directoryIndexs = options.directoryIndexs;
+        if (options.listNavigator != undefined) this.listNavigator = options.listNavigator;
+        if (options.logAccess != undefined) this.logAccess = options.logAccess;
         this.updateBuffer();
         return this;
     }
@@ -252,10 +287,16 @@ export class MinuetWeb {
      */
     public updateBuffer() : MinuetWeb {
         if (this.buffering){
+            this.buffers = {};
+            this.directoryBuffers = [ "/" ];
             this.search(this.rootDir);
             if (typeof this.notFound == "string"){
                 const content = fs.readFileSync(this.notFound.toString());
-                this.buffers["#notfound"] = content;
+                this.buffers[MinuetWebBufferName.notFound] = content;
+            }
+            if (this.listNavigator){
+                const content = fs.readFileSync(__dirname + "/listnavigator/index.html");
+                this.buffers[MinuetWebBufferName.listNavigator] = content;
             }
         }
         return this;
@@ -274,7 +315,6 @@ export class MinuetWeb {
     }
 
     private search(targetPath : string) {
-        this.buffers = {};
         const target = targetPath;
         const list = fs.readdirSync(target, {
             withFileTypes: true,
@@ -283,6 +323,7 @@ export class MinuetWeb {
             const l_ = list[n];
 
             if (l_.isDirectory()){
+                this.directoryBuffers.push((targetPath + "/" + l_.name).substring(this.rootDir.length).split("//").join("/"));
                 this.search(targetPath + "/" + l_.name);
             }
             else {
@@ -353,7 +394,7 @@ export class MinuetWeb {
         else {
             let notFoundPath = this.notFound;
             if (this.buffering){
-                notFoundPath = "#notfound";
+                notFoundPath = MinuetWebBufferName.notFound;
             }
             const content = this.readFile(notFoundPath);
             res.statusCode = 404;
@@ -392,6 +433,74 @@ export class MinuetWeb {
 
         return decisionUrl;        
     }
+
+    private getDirectories(url : string) {
+        let res = [];
+
+        if (this.buffering) {
+            for (let n = 0 ; n < this.directoryBuffers.length ; n++) {
+                const dir = this.directoryBuffers[n];
+
+                if (dir.indexOf(url) == 0 && dir != url) {
+                    if (dir.substring(url.length).split("/").length == 2) {
+                        res.push(dir);
+                    }
+                }
+            }
+
+            const bc = Object.keys(this.buffers);
+            for (let n = 0 ; n < bc.length ; n++) {
+                const file = bc[n];
+
+                if (file.indexOf(url) == 0) {
+                    if (file.substring(url.length).split("/").length == 2) {
+                        res.push(file);
+                    }
+                }
+            }
+        }
+        else {
+            // comming soon...
+        }
+
+        return res;
+    }
+
+    private isDirectory(req :IncomingMessage, res : ServerResponse) : boolean {
+        let url = req.url.split("?")[0];
+        if (url[url.length - 1] == "/") {
+            url = url.substring(0, url.length - 1);
+        }
+        if (this.buffering){
+            if (this.directoryBuffers.indexOf(url) === -1){
+                return false;
+            }
+
+            let content = this.buffers[MinuetWebBufferName.listNavigator].toString();
+            content = content.split("{url}").join(url);
+            content = content.split("{back}").join(path.dirname(url));
+            const list = this.getDirectories(url);
+            let listStr = "";
+            for (let n = 0 ; n < list.length ; n++) {
+                const l_ = list[n];
+                const td = "<tr><td>-</td><td><a href=\"" + l_ + "\">" + path.basename(l_) + "</a></td></tr>";
+                listStr += td;
+            }
+            content = content.split("{lists}").join(listStr);
+            const d_ = new Date();
+            const nowDate = d_.getFullYear() + "/" + ("0" + (d_.getMonth() + 1)).slice(-2) + "/" + ("0" + d_.getDate()).slice(-2)
+                            + " " + ("0" + d_.getHours()).slice(-2) + ":" + ("0" + d_.getMinutes()).slice(-2) + ":" + ("0" + d_.getSeconds()).slice(-2);
+            content = content.split("{comment}").join("Minuet Server | " + nowDate);
+            res.write(content);
+            res.end();
+        }
+        else {
+            // comming soon...
+        }
+
+        return true;
+    }
+
     /**
      * ***listen*** : Proxy processing when the server listens.
      * Here, based on the request URL,   
@@ -402,13 +511,14 @@ export class MinuetWeb {
      * @returns {boolean} judgment result
      */
     public listen(req :IncomingMessage, res : ServerResponse ) : boolean {
-        let url = this.getUrl(req.url.split("?")[0]);
+        const url0 = req.url.split("?")[0];
+        let url = this.getUrl(url0);
         if (!url){
+            if (this.listNavigator && this.isDirectory(req, res)){
+                return true
+            }
             return this.error(res);
         }
-//        if (!this.buffers[url]){
-//            if (!this.existFile(url)) return this.error(res);
-//        }
         let content = this.readFile(url);
 
         res.statusCode = 200;
@@ -417,24 +527,43 @@ export class MinuetWeb {
         res.write(content);
         res.end();
 
+        // access log write
+        this.log(this.logAccess, req, res);
+
         return true;
+    }
+
+    // log write
+    private log(logMode : string, req : IncomingMessage, res : ServerResponse, message? : string) {
+        if (!logMode) return;
+        if (this.logger) {
+            if (typeof logMode == "string") {
+                this.logger.write(logMode, req, res, message);
+            }
+        }
     }
 }
 
 export class MinuetServerModuleWeb extends MinuetServerModuleBase {
     
-    public mse : MinuetWeb;
+    public web : MinuetWeb;
 
     public onBegin(){
         if (!this.init) {
             this.init = {};
         }
         this.init.rootDir = this.sector.root + "/" + this.init.rootDir,
-        this.mse = new MinuetWeb(this.init);
+        this.web = new MinuetWeb(this.init);
+
+        // load logger module
+        const logger = this.getModule("logger");
+        if (logger) {
+            this.web.logger = logger;
+        }
     }
 
-    public onRequest(req: IncomingMessage, res: ServerResponse<IncomingMessage>): void {
-        this.mse.listen(req, res);
+    public async onRequest(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+        return await this.web.listen(req, res);
     }
 
 }

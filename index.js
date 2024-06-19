@@ -1,4 +1,13 @@
 "use strict";
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.MinuetServerModuleWeb = exports.MinuetWeb = exports.DefaultMimes = void 0;
 /**
@@ -55,6 +64,11 @@ exports.DefaultMimes = {
     "7z": "application/x-7z-compressed",
     csv: "text/csv",
 };
+var MinuetWebBufferName;
+(function (MinuetWebBufferName) {
+    MinuetWebBufferName["notFound"] = "#notfound";
+    MinuetWebBufferName["listNavigator"] = "#listNavigator";
+})(MinuetWebBufferName || (MinuetWebBufferName = {}));
 /**
  * ### MinuetWeb
  * A class for listening to a web server for static content.
@@ -138,7 +152,14 @@ class MinuetWeb {
          * ***directoryIndexs*** : Specifies a list of files to display for a directory request.
          */
         this.directoryIndexs = [];
+        /**
+         * ***listNavigator*** : Determines whether to display the file/directory list screen when a directory area is specified in the URL.
+         * Displays the list screen when there is no content to display in the URL to the directory.
+         * The default is ``false``.
+         */
+        this.listNavigator = false;
         this.buffers = {};
+        this.directoryBuffers = [];
         if (options) {
             this.setting(options);
         }
@@ -172,6 +193,8 @@ class MinuetWeb {
             this.notFound = options.notFound;
         if (options.directoryIndexs != undefined)
             this.directoryIndexs = options.directoryIndexs;
+        if (options.listNavigator != undefined)
+            this.listNavigator = options.listNavigator;
         this.updateBuffer();
         return this;
     }
@@ -182,10 +205,16 @@ class MinuetWeb {
      */
     updateBuffer() {
         if (this.buffering) {
+            this.buffers = {};
+            this.directoryBuffers = ["/"];
             this.search(this.rootDir);
             if (typeof this.notFound == "string") {
                 const content = fs.readFileSync(this.notFound.toString());
-                this.buffers["#notfound"] = content;
+                this.buffers[MinuetWebBufferName.notFound] = content;
+            }
+            if (this.listNavigator) {
+                const content = fs.readFileSync(__dirname + "/listnavigator/index.html");
+                this.buffers[MinuetWebBufferName.listNavigator] = content;
             }
         }
         return this;
@@ -202,7 +231,6 @@ class MinuetWeb {
         return this;
     }
     search(targetPath) {
-        this.buffers = {};
         const target = targetPath;
         const list = fs.readdirSync(target, {
             withFileTypes: true,
@@ -210,6 +238,7 @@ class MinuetWeb {
         for (let n = 0; n < list.length; n++) {
             const l_ = list[n];
             if (l_.isDirectory()) {
+                this.directoryBuffers.push((targetPath + "/" + l_.name).substring(this.rootDir.length).split("//").join("/"));
                 this.search(targetPath + "/" + l_.name);
             }
             else {
@@ -274,7 +303,7 @@ class MinuetWeb {
         else {
             let notFoundPath = this.notFound;
             if (this.buffering) {
-                notFoundPath = "#notfound";
+                notFoundPath = MinuetWebBufferName.notFound;
             }
             const content = this.readFile(notFoundPath);
             res.statusCode = 404;
@@ -311,6 +340,62 @@ class MinuetWeb {
         }
         return decisionUrl;
     }
+    getDirectories(url) {
+        let res = [];
+        if (this.buffering) {
+            for (let n = 0; n < this.directoryBuffers.length; n++) {
+                const dir = this.directoryBuffers[n];
+                if (dir.indexOf(url) == 0 && dir != url) {
+                    if (dir.substring(url.length).split("/").length == 2) {
+                        res.push(dir);
+                    }
+                }
+            }
+            const bc = Object.keys(this.buffers);
+            for (let n = 0; n < bc.length; n++) {
+                const file = bc[n];
+                if (file.indexOf(url) == 0) {
+                    if (file.substring(url.length).split("/").length == 2) {
+                        res.push(file);
+                    }
+                }
+            }
+        }
+        else {
+        }
+        return res;
+    }
+    isDirectory(req, res) {
+        let url = req.url.split("?")[0];
+        if (url[url.length - 1] == "/") {
+            url = url.substring(0, url.length - 1);
+        }
+        if (this.buffering) {
+            if (this.directoryBuffers.indexOf(url) === -1) {
+                return false;
+            }
+            let content = this.buffers[MinuetWebBufferName.listNavigator].toString();
+            content = content.split("{url}").join(url);
+            content = content.split("{back}").join(path.dirname(url));
+            const list = this.getDirectories(url);
+            let listStr = "";
+            for (let n = 0; n < list.length; n++) {
+                const l_ = list[n];
+                const td = "<tr><td>-</td><td><a href=\"" + l_ + "\">" + path.basename(l_) + "</a></td></tr>";
+                listStr += td;
+            }
+            content = content.split("{lists}").join(listStr);
+            const d_ = new Date();
+            const nowDate = d_.getFullYear() + "/" + ("0" + (d_.getMonth() + 1)).slice(-2) + "/" + ("0" + d_.getDate()).slice(-2)
+                + " " + ("0" + d_.getHours()).slice(-2) + ":" + ("0" + d_.getMinutes()).slice(-2) + ":" + ("0" + d_.getSeconds()).slice(-2);
+            content = content.split("{comment}").join("Minuet Server | " + nowDate);
+            res.write(content);
+            res.end();
+        }
+        else {
+        }
+        return true;
+    }
     /**
      * ***listen*** : Proxy processing when the server listens.
      * Here, based on the request URL,
@@ -321,13 +406,14 @@ class MinuetWeb {
      * @returns {boolean} judgment result
      */
     listen(req, res) {
-        let url = this.getUrl(req.url.split("?")[0]);
+        const url0 = req.url.split("?")[0];
+        let url = this.getUrl(url0);
         if (!url) {
+            if (this.listNavigator && this.isDirectory(req, res)) {
+                return true;
+            }
             return this.error(res);
         }
-        //        if (!this.buffers[url]){
-        //            if (!this.existFile(url)) return this.error(res);
-        //        }
         let content = this.readFile(url);
         res.statusCode = 200;
         this.headers["content-type"] = this.getMime(url);
@@ -347,7 +433,9 @@ class MinuetServerModuleWeb extends minuet_server_1.MinuetServerModuleBase {
             this.mse = new MinuetWeb(this.init);
     }
     onRequest(req, res) {
-        this.mse.listen(req, res);
+        return __awaiter(this, void 0, void 0, function* () {
+            return yield this.mse.listen(req, res);
+        });
     }
 }
 exports.MinuetServerModuleWeb = MinuetServerModuleWeb;
