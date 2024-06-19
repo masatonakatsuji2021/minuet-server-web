@@ -3,10 +3,19 @@ import { MinuetWeb } from "../";
 import * as http from "http";
 
 const mw = new MinuetWeb({
+
     // root directory
     rootDir: "htdocs",
+
     // 404 not found HTML file.
     notFound:  "error.html",
+
+    // direct reading ()
+    directReading: true,
+
+    // buffering max size (150KB)
+    bufferingMaxSize: 150000,
+
     // response header 
     headers : {
         // cache control (keep max 60s)
@@ -14,6 +23,7 @@ const mw = new MinuetWeb({
     },
     // directory indexs
     directoryIndexs: [ "index.html" ],
+
     // list navigator
     listNavigator: true,
 });

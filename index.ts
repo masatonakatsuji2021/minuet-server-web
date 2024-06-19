@@ -95,7 +95,7 @@ export interface MinuetWebOption {
 
     /**
      * ***bufferingMaxSize*** : Maximum size of buffered file.  
-     * (The default is 4MB.)
+     * (The default is 300KB.)
      */
     bufferingMaxSize? : number,
 
@@ -201,9 +201,9 @@ export class MinuetWeb {
 
     /**
      * ***bufferingMaxSize*** : Maximum size of buffered file.  
-     * (The default is 4MB.)
+     * (The default is 300KB. )
      */
-    public bufferingMaxSize : number =  4000000;
+    public bufferingMaxSize : number =  300000;
 
     /**
      * ***directReading*** : When ``buffering`` is set to ``true``,    
@@ -362,6 +362,15 @@ export class MinuetWeb {
     }
 
     private existFile(targetPath : string) : boolean {
+        if (this.buffering){
+            if (this.buffers[targetPath]) {
+                return true;
+            }
+            else {
+                if (!this.directReading) return false;
+            }
+        }
+
         let targetFullPath = this.rootDir + "/" + targetPath;
         targetFullPath = targetFullPath.split("//").join("/");
         if (!fs.existsSync(targetFullPath)) {
@@ -372,7 +381,9 @@ export class MinuetWeb {
 
     private readFile(targetPath : string) : Buffer | null  {
         if (this.buffering){
-            return this.buffers[targetPath];
+            if (this.buffers[targetPath]) {
+                return this.buffers[targetPath];
+            }
         }
 
         let targetFullPath = this.rootDir + "/" + targetPath;
@@ -407,28 +418,27 @@ export class MinuetWeb {
     private getUrl(baseUrl: string) : string {
         const url = baseUrl.split("?")[0];
         let urlList = [];
-        urlList.push(url);
         for (let n = 0 ; n < this.directoryIndexs.length ; n++){
             const index = this.directoryIndexs[n];
             urlList.push((url + "/" + index).split("//").join("/"));
         }
-
-        let decisionUrl : string;
+        let decisionUrl : string = baseUrl;
         for (let n = 0 ; n < urlList.length ; n++){
-            const url_ = urlList[n];;
-            if (this.directReading) {
-                const exists = fs.existsSync(this.rootDir + "/" + url_);
-                if (exists) {
-                    decisionUrl = url_;
-                    break;                   
-                }
-             }
-             else {
+            const url_ = urlList[n];
+
+            if (this.buffering){
                 if(this.buffers[url_]){
                     decisionUrl = url_;
                     break;
-                }                    
-             }
+                }
+                if (!this.directReading) continue;
+            }
+
+            const exists = fs.existsSync(this.rootDir + "/" + url_);
+            if (exists) {
+                decisionUrl = url_;
+                break;                   
+            }
         }
 
         return decisionUrl;        
@@ -519,6 +529,8 @@ export class MinuetWeb {
             }
             return this.error(res);
         }
+
+        if (!this.existFile(url)) return this.error(res);
         let content = this.readFile(url);
 
         res.statusCode = 200;

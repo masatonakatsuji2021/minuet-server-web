@@ -8,6 +8,10 @@ const mw = new __1.MinuetWeb({
     rootDir: "htdocs",
     // 404 not found HTML file.
     notFound: "error.html",
+    // direct reading ()
+    directReading: true,
+    // buffering max size (150KB)
+    bufferingMaxSize: 150000,
     // response header 
     headers: {
         // cache control (keep max 60s)
