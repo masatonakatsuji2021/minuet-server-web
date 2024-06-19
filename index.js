@@ -131,9 +131,9 @@ class MinuetWeb {
         this.buffering = true;
         /**
          * ***bufferingMaxSize*** : Maximum size of buffered file.
-         * (The default is 8MB.)
+         * (The default is 4MB.)
          */
-        this.bufferingMaxSize = 8000000;
+        this.bufferingMaxSize = 4000000;
         /**
          * ***directReading*** : When ``buffering`` is set to ``true``,
          * this setting determines whether to load and output files
@@ -195,6 +195,8 @@ class MinuetWeb {
             this.directoryIndexs = options.directoryIndexs;
         if (options.listNavigator != undefined)
             this.listNavigator = options.listNavigator;
+        if (options.logAccess != undefined)
+            this.logAccess = options.logAccess;
         this.updateBuffer();
         return this;
     }
@@ -362,6 +364,7 @@ class MinuetWeb {
             }
         }
         else {
+            // comming soon...
         }
         return res;
     }
@@ -393,6 +396,7 @@ class MinuetWeb {
             res.end();
         }
         else {
+            // comming soon...
         }
         return true;
     }
@@ -420,7 +424,19 @@ class MinuetWeb {
         this.setHeader(res);
         res.write(content);
         res.end();
+        // access log write
+        this.log(this.logAccess, req, res);
         return true;
+    }
+    // log write
+    log(logMode, req, res, message) {
+        if (!logMode)
+            return;
+        if (this.logger) {
+            if (typeof logMode == "string") {
+                this.logger.write(logMode, req, res, message);
+            }
+        }
     }
 }
 exports.MinuetWeb = MinuetWeb;
@@ -430,11 +446,16 @@ class MinuetServerModuleWeb extends minuet_server_1.MinuetServerModuleBase {
             this.init = {};
         }
         this.init.rootDir = this.sector.root + "/" + this.init.rootDir,
-            this.mse = new MinuetWeb(this.init);
+            this.web = new MinuetWeb(this.init);
+        // load logger module
+        const logger = this.getModule("logger");
+        if (logger) {
+            this.web.logger = logger;
+        }
     }
     onRequest(req, res) {
         return __awaiter(this, void 0, void 0, function* () {
-            return yield this.mse.listen(req, res);
+            return yield this.web.listen(req, res);
         });
     }
 }
