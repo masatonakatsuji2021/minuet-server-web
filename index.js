@@ -286,8 +286,14 @@ class MinuetWeb {
             }
         }
         let targetFullPath = this.rootDir + "/" + targetPath;
+        if (this.url != "/") {
+            targetFullPath = this.rootDir + "/" + targetPath.substring(this.url.length);
+        }
         targetFullPath = targetFullPath.split("//").join("/");
         if (!fs.existsSync(targetFullPath)) {
+            return false;
+        }
+        if (!fs.statSync(targetFullPath).isFile()) {
             return false;
         }
         return true;
@@ -299,6 +305,9 @@ class MinuetWeb {
             }
         }
         let targetFullPath = this.rootDir + "/" + targetPath;
+        if (this.url != "/") {
+            targetFullPath = this.rootDir + "/" + targetPath.substring(this.url.length);
+        }
         targetFullPath = targetFullPath.split("//").join("/");
         const content = fs.readFileSync(targetFullPath);
         return content;
