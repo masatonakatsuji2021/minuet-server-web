@@ -65,7 +65,7 @@ export interface MinuetWebOption {
      * ***rootDir*** : Root directory to deploy as a server.  
      * If not specified, ``htdocs`` is used as the root directory.
      */
-    rootDir? : string,
+    rootDir? : string | {[url : string] : string},
 
     /**
      * ***mimes*** : List of MIMETypes allowed for deployment by the server.  
@@ -171,7 +171,7 @@ export class MinuetWeb {
      * ***rootDir*** : Root directory to deploy as a server.  
      * If not specified, ``htdocs`` is used as the root directory.
      */
-    public rootDir : string = "htdocs";
+    public rootDir : string | {[url : string] : string} = "htdocs";
 
     /**
      * ***mimes*** : List of MIMETypes allowed for deployment by the server.  
@@ -240,7 +240,6 @@ export class MinuetWeb {
     public logAccess? : string;
 
     private buffers = {};
-    private directoryBuffers = [];
     public logger;
 
     /**
@@ -288,8 +287,16 @@ export class MinuetWeb {
     public updateBuffer() : MinuetWeb {
         if (this.buffering){
             this.buffers = {};
-            this.directoryBuffers = [ "/" ];
-            this.search(this.rootDir);
+            if(typeof this.rootDir == "string") {
+                this.rootDir = { "/" : this.rootDir };
+            }
+            const r = Object.keys(this.rootDir);
+            for(let n = 0 ; n < r.length ; n++) {
+                const url = r[n];
+                const rootDir = this.rootDir[url];
+                this.search(rootDir, url);
+            }
+
             if (typeof this.notFound == "string"){
                 const content = fs.readFileSync(this.notFound.toString());
                 this.buffers[MinuetWebBufferName.notFound] = content;
@@ -309,12 +316,25 @@ export class MinuetWeb {
      * @returns {MinuetWeb}
      */
     public addBuffer(filePath : string, content : Buffer) : MinuetWeb {
-        const fileName = (this.url + filePath.substring(this.rootDir.length)).split("//").join("/");
+        if (typeof this.rootDir == "string") this.rootDir = { "/" : this.rootDir };
+        const c = Object.keys(this.rootDir);
+        let fileName;
+        for (let n = 0 ; n < c.length ; n++) {
+            const burl = c[n];
+            const rootDir = this.rootDir[burl];
+            if (filePath.indexOf(rootDir) === 0) {
+                let url2 = burl;
+                if (url2 == "/"){
+                    url2 = "";
+                }
+                fileName = (url2 + filePath.substring(rootDir.length)).split("//").join("/");
+            }
+        }
         this.buffers[fileName] = content;
         return this;
     }
 
-    private search(targetPath : string) {
+    private search(targetPath : string, url : string) {
         const target = targetPath;
         const list = fs.readdirSync(target, {
             withFileTypes: true,
@@ -323,8 +343,7 @@ export class MinuetWeb {
             const l_ = list[n];
 
             if (l_.isDirectory()){
-                this.directoryBuffers.push((targetPath + "/" + l_.name).substring(this.rootDir.length).split("//").join("/"));
-                this.search(targetPath + "/" + l_.name);
+                this.search(targetPath + "/" + l_.name, url);
             }
             else {
                 if (!this.hasMine(l_.name)) continue;
@@ -361,46 +380,64 @@ export class MinuetWeb {
         }
     }
 
-    private existFile(targetPath : string) : boolean {
+    private readFile(targetPath : string) : {content : Buffer | null, mime : string}  {
         if (this.buffering){
             if (this.buffers[targetPath]) {
-                return true;
-            }
-            else {
-                if (!this.directReading) return false;
-            }
-        }
-
-        let targetFullPath = this.rootDir + "/" + targetPath;
-        if (this.url != "/") {
-            targetFullPath = this.rootDir + "/" + targetPath.substring(this.url.length);
-        }
-        targetFullPath = targetFullPath.split("//").join("/");
-        if (!fs.existsSync(targetFullPath)) {
-            return false;
-        }
-
-        if (!fs.statSync(targetFullPath).isFile()){
-            return false;
-        }
-
-        return true;
-    }
-
-    private readFile(targetPath : string) : Buffer | null  {
-        if (this.buffering){
-            if (this.buffers[targetPath]) {
-                return this.buffers[targetPath];
+                const content = this.buffers[targetPath];
+                const mime = this.getMime(targetPath);
+                return {
+                    content: content,
+                    mime : mime,
+                };
             }
         }
 
-        let targetFullPath = this.rootDir + "/" + targetPath;
-        if (this.url != "/") {
-            targetFullPath = this.rootDir + "/" + targetPath.substring(this.url.length);
+        if (typeof this.rootDir == "string") this.rootDir = { "/" : this.rootDir };
+
+        const c = Object.keys(this.rootDir);
+        let decisionPath;
+        for (let n = 0 ; n < c.length ; n++) {
+            const burl = c[n];
+            const rootDir = this.rootDir[burl];
+
+            let targetFullPath = rootDir + "/" + targetPath.substring(burl.length) ;
+            if (this.url != "/") {
+                targetFullPath = rootDir + "/" + targetPath.substring(this.url.length).substring(burl.length) ;
+            }
+            targetFullPath = targetFullPath.split("//").join("/");
+            if (fs.existsSync(targetFullPath)) {
+                if (fs.statSync(targetFullPath).isFile()){
+                    decisionPath = targetFullPath;
+                    break;
+                }
+            }
+
+            for (let n2 = 0 ; n2 < this.directoryIndexs.length ; n2++) {
+                const index = this.directoryIndexs[n2];
+                let targetFullPath = rootDir + "/" + targetPath.substring(burl.length) + "/" + index;
+                if (this.url != "/") {
+                    targetFullPath = rootDir + "/" + targetPath.substring(this.url.length).substring(burl.length) + "/" + index;
+                }
+                targetFullPath = targetFullPath.split("//").join("/");
+                if (fs.existsSync(targetFullPath)) {
+                    if (fs.statSync(targetFullPath).isFile()) {
+                        decisionPath = targetFullPath;
+                        break;
+                    }
+                }
+            }
         }
-        targetFullPath = targetFullPath.split("//").join("/");
-        const content = fs.readFileSync(targetFullPath);
-        return content;
+
+        if (!decisionPath){
+            return;
+        }
+
+        const content = fs.readFileSync(decisionPath);
+        const mime = this.getMime(decisionPath);
+        return {
+            content: content,
+            mime : mime,
+        };
     }
 
     // How to deal with errors (404 not found).
@@ -414,14 +451,29 @@ export class MinuetWeb {
             return true;
         }
         else {
-            let notFoundPath = this.notFound;
-            if (this.buffering){
-                notFoundPath = MinuetWebBufferName.notFound;
+            try {
+                let content;
+                if (this.buffering){
+                    const notFound = MinuetWebBufferName.notFound;
+                    if (!this.buffers[notFound]) {
+                        throw Error("Page Not Found");
+                    }
+
+                    content = this.buffers[notFound];
+                }
+                else {
+                    content = fs.readFileSync(this.notFound);
+                }
+      
+                res.statusCode = 404;
+                res.write(content);
+                res.end();
+
+            }catch(error) {
+                console.log(error);
+                res.write("ERROR");
+                res.end();
             }
-            const content = this.readFile(notFoundPath);
-            res.statusCode = 404;
-            res.write(content);
-            res.end();
             return true;
         }
     }
@@ -445,13 +497,25 @@ export class MinuetWeb {
                 if (!this.directReading) continue;
             }
 
-            const exists = fs.existsSync(this.rootDir + "/" + url_);
+            if (typeof this.rootDir == "string") this.rootDir = { "/" : this.rootDir };
+            const c = Object.keys(this.rootDir);
+            let exists = false;
+            for (let n2 = 0 ; n2 < c.length ; n2++) {
+                const burl = c[n2];
+                const rootDir = this.rootDir[burl];
+                const existsBuff = fs.existsSync((rootDir + "/" + url_).split("//").join("/"));
+                if (existsBuff){
+                    exists = true;
+                    break;
+                }
+            }
+
             if (exists) {
                 decisionUrl = url_;
                 break;                   
             }
         }
-
+        
         return decisionUrl;        
     }
 
@@ -459,16 +523,6 @@ export class MinuetWeb {
         let res = [];
 
         if (this.buffering) {
-            for (let n = 0 ; n < this.directoryBuffers.length ; n++) {
-                const dir = this.directoryBuffers[n];
-
-                if (dir.indexOf(url) == 0 && dir != url) {
-                    if (dir.substring(url.length).split("/").length == 2) {
-                        res.push(dir);
-                    }
-                }
-            }
-
             const bc = Object.keys(this.buffers);
             for (let n = 0 ; n < bc.length ; n++) {
                 const file = bc[n];
@@ -493,10 +547,6 @@ export class MinuetWeb {
             url = url.substring(0, url.length - 1);
         }
         if (this.buffering){
-            if (this.directoryBuffers.indexOf(url) === -1){
-                return false;
-            }
-
             let content = this.buffers[MinuetWebBufferName.listNavigator].toString();
             content = content.split("{url}").join(url);
             content = content.split("{back}").join(path.dirname(url));
@@ -541,13 +591,19 @@ export class MinuetWeb {
             return this.error(res);
         }
 
-        if (!this.existFile(url)) return this.error(res);
-        let content = this.readFile(url);
+        let buff;
+        try {
+            buff = this.readFile(url);
+            if (!buff) throw Error("page not found");
+            if (!buff.mime) throw Error("not supported mime type");
+        }catch(err){
+            return this.error(res);
+        }
 
         res.statusCode = 200;
-        this.headers["content-type"] = this.getMime(url);
+        this.headers["content-type"] = buff.mime;
         this.setHeader(res);
-        res.write(content);
+        res.write(buff.content);
         res.end();
 
         // access log write
@@ -586,7 +642,11 @@ export class MinuetServerModuleWeb extends MinuetServerModuleBase {
     }
 
     public async onRequest(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
-        return await this.web.listen(req, res);
+        try {
+            return await this.web.listen(req, res);
+        }catch(err){
+            return;
+        }
     }
 
 }

@@ -159,7 +159,6 @@ class MinuetWeb {
          */
         this.listNavigator = false;
         this.buffers = {};
-        this.directoryBuffers = [];
         if (options) {
             this.setting(options);
         }
@@ -208,8 +207,15 @@ class MinuetWeb {
     updateBuffer() {
         if (this.buffering) {
             this.buffers = {};
-            this.directoryBuffers = ["/"];
-            this.search(this.rootDir);
+            if (typeof this.rootDir == "string") {
+                this.rootDir = { "/": this.rootDir };
+            }
+            const r = Object.keys(this.rootDir);
+            for (let n = 0; n < r.length; n++) {
+                const url = r[n];
+                const rootDir = this.rootDir[url];
+                this.search(rootDir, url);
+            }
             if (typeof this.notFound == "string") {
                 const content = fs.readFileSync(this.notFound.toString());
                 this.buffers[MinuetWebBufferName.notFound] = content;
@@ -218,6 +224,7 @@ class MinuetWeb {
                 const content = fs.readFileSync(__dirname + "/listnavigator/index.html");
                 this.buffers[MinuetWebBufferName.listNavigator] = content;
             }
+            console.log(this.buffers);
         }
         return this;
     }
@@ -228,11 +235,25 @@ class MinuetWeb {
      * @returns {MinuetWeb}
      */
     addBuffer(filePath, content) {
-        const fileName = (this.url + filePath.substring(this.rootDir.length)).split("//").join("/");
+        if (typeof this.rootDir == "string")
+            this.rootDir = { "/": this.rootDir };
+        const c = Object.keys(this.rootDir);
+        let fileName;
+        for (let n = 0; n < c.length; n++) {
+            const burl = c[n];
+            const rootDir = this.rootDir[burl];
+            if (filePath.indexOf(rootDir) === 0) {
+                let url2 = burl;
+                if (url2 == "/") {
+                    url2 = "";
+                }
+                fileName = (url2 + filePath.substring(rootDir.length)).split("//").join("/");
+            }
+        }
         this.buffers[fileName] = content;
         return this;
     }
-    search(targetPath) {
+    search(targetPath, url) {
         const target = targetPath;
         const list = fs.readdirSync(target, {
             withFileTypes: true,
@@ -240,8 +261,7 @@ class MinuetWeb {
         for (let n = 0; n < list.length; n++) {
             const l_ = list[n];
             if (l_.isDirectory()) {
-                this.directoryBuffers.push((targetPath + "/" + l_.name).substring(this.rootDir.length).split("//").join("/"));
-                this.search(targetPath + "/" + l_.name);
+                this.search(targetPath + "/" + l_.name, url);
             }
             else {
                 if (!this.hasMine(l_.name))
@@ -275,42 +295,59 @@ class MinuetWeb {
             res.setHeader(name, value);
         }
     }
-    existFile(targetPath) {
-        if (this.buffering) {
-            if (this.buffers[targetPath]) {
-                return true;
-            }
-            else {
-                if (!this.directReading)
-                    return false;
-            }
-        }
-        let targetFullPath = this.rootDir + "/" + targetPath;
-        if (this.url != "/") {
-            targetFullPath = this.rootDir + "/" + targetPath.substring(this.url.length);
-        }
-        targetFullPath = targetFullPath.split("//").join("/");
-        if (!fs.existsSync(targetFullPath)) {
-            return false;
-        }
-        if (!fs.statSync(targetFullPath).isFile()) {
-            return false;
-        }
-        return true;
-    }
     readFile(targetPath) {
         if (this.buffering) {
             if (this.buffers[targetPath]) {
-                return this.buffers[targetPath];
+                const content = this.buffers[targetPath];
+                const mime = this.getMime(targetPath);
+                return {
+                    content: content,
+                    mime: mime,
+                };
             }
         }
-        let targetFullPath = this.rootDir + "/" + targetPath;
-        if (this.url != "/") {
-            targetFullPath = this.rootDir + "/" + targetPath.substring(this.url.length);
+        if (typeof this.rootDir == "string")
+            this.rootDir = { "/": this.rootDir };
+        const c = Object.keys(this.rootDir);
+        let decisionPath;
+        for (let n = 0; n < c.length; n++) {
+            const burl = c[n];
+            const rootDir = this.rootDir[burl];
+            let targetFullPath = rootDir + "/" + targetPath.substring(burl.length);
+            if (this.url != "/") {
+                targetFullPath = rootDir + "/" + targetPath.substring(this.url.length).substring(burl.length);
+            }
+            targetFullPath = targetFullPath.split("//").join("/");
+            if (fs.existsSync(targetFullPath)) {
+                if (fs.statSync(targetFullPath).isFile()) {
+                    decisionPath = targetFullPath;
+                    break;
+                }
+            }
+            for (let n2 = 0; n2 < this.directoryIndexs.length; n2++) {
+                const index = this.directoryIndexs[n2];
+                let targetFullPath = rootDir + "/" + targetPath.substring(burl.length) + "/" + index;
+                if (this.url != "/") {
+                    targetFullPath = rootDir + "/" + targetPath.substring(this.url.length).substring(burl.length) + "/" + index;
+                }
+                targetFullPath = targetFullPath.split("//").join("/");
+                if (fs.existsSync(targetFullPath)) {
+                    if (fs.statSync(targetFullPath).isFile()) {
+                        decisionPath = targetFullPath;
+                        break;
+                    }
+                }
+            }
         }
-        targetFullPath = targetFullPath.split("//").join("/");
-        const content = fs.readFileSync(targetFullPath);
-        return content;
+        if (!decisionPath) {
+            return;
+        }
+        const content = fs.readFileSync(decisionPath);
+        const mime = this.getMime(decisionPath);
+        return {
+            content: content,
+            mime: mime,
+        };
     }
     // How to deal with errors (404 not found).
     error(res) {
@@ -323,14 +360,27 @@ class MinuetWeb {
             return true;
         }
         else {
-            let notFoundPath = this.notFound;
-            if (this.buffering) {
-                notFoundPath = MinuetWebBufferName.notFound;
+            try {
+                let content;
+                if (this.buffering) {
+                    const notFound = MinuetWebBufferName.notFound;
+                    if (!this.buffers[notFound]) {
+                        throw Error("Page Not Found");
+                    }
+                    content = this.buffers[notFound];
+                }
+                else {
+                    content = fs.readFileSync(this.notFound);
+                }
+                res.statusCode = 404;
+                res.write(content);
+                res.end();
             }
-            const content = this.readFile(notFoundPath);
-            res.statusCode = 404;
-            res.write(content);
-            res.end();
+            catch (error) {
+                console.log(error);
+                res.write("ERROR");
+                res.end();
+            }
             return true;
         }
     }
@@ -352,7 +402,19 @@ class MinuetWeb {
                 if (!this.directReading)
                     continue;
             }
-            const exists = fs.existsSync(this.rootDir + "/" + url_);
+            if (typeof this.rootDir == "string")
+                this.rootDir = { "/": this.rootDir };
+            const c = Object.keys(this.rootDir);
+            let exists = false;
+            for (let n2 = 0; n2 < c.length; n2++) {
+                const burl = c[n2];
+                const rootDir = this.rootDir[burl];
+                const existsBuff = fs.existsSync((rootDir + "/" + url_).split("//").join("/"));
+                if (existsBuff) {
+                    exists = true;
+                    break;
+                }
+            }
             if (exists) {
                 decisionUrl = url_;
                 break;
@@ -363,14 +425,6 @@ class MinuetWeb {
     getDirectories(url) {
         let res = [];
         if (this.buffering) {
-            for (let n = 0; n < this.directoryBuffers.length; n++) {
-                const dir = this.directoryBuffers[n];
-                if (dir.indexOf(url) == 0 && dir != url) {
-                    if (dir.substring(url.length).split("/").length == 2) {
-                        res.push(dir);
-                    }
-                }
-            }
             const bc = Object.keys(this.buffers);
             for (let n = 0; n < bc.length; n++) {
                 const file = bc[n];
@@ -392,9 +446,6 @@ class MinuetWeb {
             url = url.substring(0, url.length - 1);
         }
         if (this.buffering) {
-            if (this.directoryBuffers.indexOf(url) === -1) {
-                return false;
-            }
             let content = this.buffers[MinuetWebBufferName.listNavigator].toString();
             content = content.split("{url}").join(url);
             content = content.split("{back}").join(path.dirname(url));
@@ -436,13 +487,21 @@ class MinuetWeb {
             }
             return this.error(res);
         }
-        if (!this.existFile(url))
+        let buff;
+        try {
+            buff = this.readFile(url);
+            if (!buff)
+                throw Error("page not found");
+            if (!buff.mime)
+                throw Error("not supported mime type");
+        }
+        catch (err) {
             return this.error(res);
-        let content = this.readFile(url);
+        }
         res.statusCode = 200;
-        this.headers["content-type"] = this.getMime(url);
+        this.headers["content-type"] = buff.mime;
         this.setHeader(res);
-        res.write(content);
+        res.write(buff.content);
         res.end();
         // access log write
         this.log(this.logAccess, req, res);

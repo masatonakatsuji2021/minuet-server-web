@@ -5,7 +5,10 @@ import * as http from "http";
 const mw = new MinuetWeb({
 
     // root directory
-    rootDir: "htdocs",
+    rootDir: {
+        "/": "htdocs",
+        "/2": "htdocs2",
+    },
 
     // 404 not found HTML file.
     notFound:  "error.html",
