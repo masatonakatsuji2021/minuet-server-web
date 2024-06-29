@@ -280,6 +280,24 @@ export class MinuetWeb {
     }
 
     /**
+     * addRootDir
+     * @param {string} url 
+     * @param {string} rootDir 
+     */
+    public addRootDir(url : string, rootDir : string) {
+        if (typeof this.rootDir == "string") {
+            this.rootDir = { "/" : this.rootDir };
+        }
+
+        this.rootDir[url] = rootDir;
+
+        if(this.buffering) {
+            this.search(rootDir, url);
+        }
+    }
+
+
+    /**
      * ***updateBuffer*** : Methods for updating buffer information.  
      * Reloads the set of target files from the root directory and updates the buffer information. 
      * @returns {MinuetWeb} 

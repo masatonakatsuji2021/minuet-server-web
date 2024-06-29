@@ -200,6 +200,20 @@ class MinuetWeb {
         return this;
     }
     /**
+     * addRootDir
+     * @param {string} url
+     * @param {string} rootDir
+     */
+    addRootDir(url, rootDir) {
+        if (typeof this.rootDir == "string") {
+            this.rootDir = { "/": this.rootDir };
+        }
+        this.rootDir[url] = rootDir;
+        if (this.buffering) {
+            this.search(rootDir, url);
+        }
+    }
+    /**
      * ***updateBuffer*** : Methods for updating buffer information.
      * Reloads the set of target files from the root directory and updates the buffer information.
      * @returns {MinuetWeb}
@@ -224,7 +238,6 @@ class MinuetWeb {
                 const content = fs.readFileSync(__dirname + "/listnavigator/index.html");
                 this.buffers[MinuetWebBufferName.listNavigator] = content;
             }
-            console.log(this.buffers);
         }
         return this;
     }
@@ -534,7 +547,12 @@ class MinuetServerModuleWeb extends minuet_server_1.MinuetServerModuleBase {
     }
     onRequest(req, res) {
         return __awaiter(this, void 0, void 0, function* () {
-            return yield this.web.listen(req, res);
+            try {
+                return yield this.web.listen(req, res);
+            }
+            catch (err) {
+                return;
+            }
         });
     }
 }
