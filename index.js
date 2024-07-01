@@ -548,7 +548,7 @@ class MinuetServerModuleWeb extends minuet_server_1.MinuetServerModuleBase {
             this.web.logger = logger;
         }
     }
-    onRequest(req, res) {
+    onListen(req, res) {
         return __awaiter(this, void 0, void 0, function* () {
             try {
                 return yield this.web.listen(req, res);

@@ -662,7 +662,7 @@ export class MinuetServerModuleWeb extends MinuetServerModuleBase {
         }
     }
 
-    public async onRequest(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+    public async onListen(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
         try {
             return await this.web.listen(req, res);
         }catch(err){
